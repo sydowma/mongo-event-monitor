@@ -2,6 +2,7 @@ package com.sydow.mongoeventmonitor;
 
 import com.mongodb.client.FindIterable;
 import com.mongodb.client.MongoCollection;
+import com.mongodb.client.result.InsertOneResult;
 import org.bson.Document;
 
 import java.util.ArrayList;
@@ -47,5 +48,25 @@ public class UserDaoImpl implements UserDao {
             result.add(this.convertToEntity(currentDocument));
         }
         return result;
+    }
+
+    @Override
+    public InsertOneResult save(UserEntity userEntity) {
+        return this.collection.insertOne(toDocument(userEntity));
+    }
+
+    private Document toDocument(UserEntity userEntity) {
+        Document document = new Document();
+        document.put("_id", userEntity.getId());
+        document.put("createTime", userEntity.getCreateTime());
+        document.put("modifyTime", userEntity.getModifyTime());
+        return document;
+    }
+
+    @Override
+    public void delete(long id) {
+
+        Document document = new Document("_id", id);
+        this.collection.deleteOne(document);
     }
 }
