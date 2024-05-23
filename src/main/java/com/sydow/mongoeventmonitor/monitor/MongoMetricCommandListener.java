@@ -20,8 +20,7 @@ import java.util.concurrent.TimeUnit;
 
 @Component
 public class MongoMetricCommandListener implements CommandListener, MeterBinder {
-
-    private final MeterRegistry meterRegistry;
+   private final MeterRegistry meterRegistry;
     private final Counter commandSuccessCounter;
     private final Counter commandErrorCounter;
     private final Timer commandTimer;
@@ -39,16 +38,16 @@ public class MongoMetricCommandListener implements CommandListener, MeterBinder 
 
     @Override
     public void bindTo(MeterRegistry meterRegistry) {
-        meterRegistry.gauge("mongodb.command.rate.oneMinute", commandSuccessCounter, counter -> counter.count() / 60);
-        meterRegistry.gauge("mongodb.command.rate.fiveMinutes", commandSuccessCounter, counter -> counter.count() / 300);
-        meterRegistry.gauge("mongodb.command.rate.fifteenMinutes", commandSuccessCounter, counter -> counter.count() / 900);
+        meterRegistry.gauge("mongodb.command.rate.oneMinute", commandSuccessCounter, Counter::count);
+        meterRegistry.gauge("mongodb.command.rate.fiveMinutes", commandSuccessCounter, counter -> counter.count() / 5);
+        meterRegistry.gauge("mongodb.command.rate.fifteenMinutes", commandSuccessCounter, counter -> counter.count() / 15);
     }
 
     @Override
     public void commandFailed(CommandFailedEvent event) {
         long startTime = startTimeHolder.get();
         long duration = System.currentTimeMillis() - startTime;
-        this.collectMetric(event.getCommandName(), duration, false);
+        this.collectMetric(event.getCommandName(), event.getDatabaseName(), duration, false);
     }
 
     @Override
@@ -58,17 +57,36 @@ public class MongoMetricCommandListener implements CommandListener, MeterBinder 
 
     @Override
     public void commandSucceeded(CommandSucceededEvent event) {
+        long startTime = startTimeHolder.get();
+        long duration = System.currentTimeMillis() - startTime;
+
         BsonDocument bsonDocument = event.getResponse();
         BsonValue writeErrors = bsonDocument.get("writeErrors");
         boolean success = writeErrors == null;
 
-        long startTime = startTimeHolder.get();
-        long duration = System.currentTimeMillis() - startTime;
-        this.collectMetric(event.getCommandName(), duration, success);
+        this.collectMetric(event.getCommandName(), event.getDatabaseName(), duration, success);
+
+        // 处理慢查询
+        if (duration > 1000) { // 假设超过1000ms为慢查询，你可以根据需要调整
+            Timer slowQueryTimer = Timer.builder("mongodb.command.slowQuery.timer")
+                    .tag("commandName", event.getCommandName())
+                    .tag("databaseName", event.getDatabaseName())
+                    .register(meterRegistry);
+            slowQueryTimer.record(duration, TimeUnit.MILLISECONDS);
+            Counter slowQueryCounter = Counter.builder("mongodb.command.slowQuery.count")
+                    .tag("commandName", event.getCommandName())
+                    .tag("databaseName", event.getDatabaseName())
+                    .register(meterRegistry);
+            slowQueryCounter.increment();
+        }
     }
 
-    private void collectMetric(String commandName, long duration, boolean success) {
-        commandTimer.record(duration, TimeUnit.MILLISECONDS);
+    private void collectMetric(String commandName, String databaseName, long duration, boolean success) {
+        Timer commandSpecificTimer = Timer.builder("mongodb.command.timer")
+                .tag("commandName", commandName)
+                .tag("databaseName", databaseName)
+                .register(meterRegistry);
+        commandSpecificTimer.record(duration, TimeUnit.MILLISECONDS);
 
         if (success) {
             commandSuccessCounter.increment();
