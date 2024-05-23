@@ -14,8 +14,8 @@ scrape_configs:
   honor_timestamps: true
   scrape_interval: 15s
   scrape_timeout: 10s
-  metrics_path: /metrics
+  metrics_path: /actuator/prometheus
   scheme: http
   static_configs:
   - targets:
-    - localhost:9090
+    - 192.168.124.56:8081
