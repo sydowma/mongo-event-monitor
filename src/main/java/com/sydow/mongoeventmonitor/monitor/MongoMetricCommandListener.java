@@ -9,7 +9,9 @@ import io.micrometer.core.instrument.Meter;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 import io.micrometer.core.instrument.binder.MeterBinder;
+import lombok.extern.slf4j.Slf4j;
 import org.bson.BsonDocument;
+import org.bson.BsonString;
 import org.bson.BsonValue;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
@@ -18,6 +20,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
+@Slf4j
 @Component
 public class MongoMetricCommandListener implements CommandListener, MeterBinder {
    private final MeterRegistry meterRegistry;
@@ -28,6 +31,7 @@ public class MongoMetricCommandListener implements CommandListener, MeterBinder 
     private static final String START_TIME = "MONGO-StartTime";
 
     private final ThreadLocal<Long> startTimeHolder = new ThreadLocal<>();
+    private final ThreadLocal<String> collectionNameHolder = new ThreadLocal<>();
 
     public MongoMetricCommandListener(MeterRegistry meterRegistry) {
         this.meterRegistry = meterRegistry;
@@ -53,6 +57,8 @@ public class MongoMetricCommandListener implements CommandListener, MeterBinder 
     @Override
     public void commandStarted(CommandStartedEvent event) {
         startTimeHolder.set(System.currentTimeMillis());
+        String collectionName = event.getCommand().get(event.getCommandName()).asString().getValue();
+        collectionNameHolder.set(collectionName);
     }
 
     @Override
@@ -67,15 +73,17 @@ public class MongoMetricCommandListener implements CommandListener, MeterBinder 
         this.collectMetric(event.getCommandName(), event.getDatabaseName(), duration, success);
 
         // 处理慢查询
-        if (duration > 1000) { // 假设超过1000ms为慢查询，你可以根据需要调整
+        if (duration > 10) { // 假设超过1000ms为慢查询，你可以根据需要调整
             Timer slowQueryTimer = Timer.builder("mongodb.command.slowQuery.timer")
                     .tag("commandName", event.getCommandName())
                     .tag("databaseName", event.getDatabaseName())
+                    .tag("collectionName", collectionNameHolder.get())
                     .register(meterRegistry);
             slowQueryTimer.record(duration, TimeUnit.MILLISECONDS);
             Counter slowQueryCounter = Counter.builder("mongodb.command.slowQuery.count")
                     .tag("commandName", event.getCommandName())
                     .tag("databaseName", event.getDatabaseName())
+            .tag("collectionName", collectionNameHolder.get())
                     .register(meterRegistry);
             slowQueryCounter.increment();
         }
@@ -85,7 +93,9 @@ public class MongoMetricCommandListener implements CommandListener, MeterBinder 
         Timer commandSpecificTimer = Timer.builder("mongodb.command.timer")
                 .tag("commandName", commandName)
                 .tag("databaseName", databaseName)
+                .tag("collectionName", collectionNameHolder.get())
                 .register(meterRegistry);
+        log.info("Registered commandSpecificTimer: {}", commandSpecificTimer);
         commandSpecificTimer.record(duration, TimeUnit.MILLISECONDS);
 
         if (success) {

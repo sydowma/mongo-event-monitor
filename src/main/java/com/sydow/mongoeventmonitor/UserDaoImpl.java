@@ -1,11 +1,18 @@
 package com.sydow.mongoeventmonitor;
 
+import com.mongodb.client.AggregateIterable;
 import com.mongodb.client.FindIterable;
 import com.mongodb.client.MongoCollection;
+import com.mongodb.client.model.Accumulators;
+import com.mongodb.client.model.Aggregates;
+import com.mongodb.client.model.Filters;
+import com.mongodb.client.result.InsertManyResult;
 import com.mongodb.client.result.InsertOneResult;
 import org.bson.Document;
+import org.bson.conversions.Bson;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 
@@ -68,5 +75,28 @@ public class UserDaoImpl implements UserDao {
 
         Document document = new Document("_id", id);
         this.collection.deleteOne(document);
+    }
+
+    @Override
+    public List<UserEntity> aggregate() {
+        List<Bson> pipeline = Arrays.asList(
+            Aggregates.match(Filters.regex("name", "name-.*")),
+            Aggregates.group("$name", Accumulators.sum("total", 1)),
+            Aggregates.sort(new Document("total", -1))
+        );
+
+        return collection.aggregate(pipeline).into(new ArrayList<>()).stream().map(this::convertToEntity).toList();
+    }
+
+    @Override
+    public InsertManyResult save(List<UserEntity> userEntity) {
+        return this.collection.insertMany(userEntity.stream().map(this::toDocument).toList());
+    }
+
+    @Override
+    public void delete(List<Long> id) {
+        Document document = new Document();
+        document.put("_id", new Document("$in", id));
+        this.collection.deleteMany(document);
     }
 }
