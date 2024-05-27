@@ -36,6 +36,8 @@ public class MongoMetricCommandListener implements CommandListener {
     private final Map<String, Counter> slowQueryCounterCache = new HashMap<>();
     private final Map<String, Counter> commandFailedCounterCache = new HashMap<>();
 
+    private final Map<Integer, String> context = new HashMap<>();
+
     private final AtomicLong oneMinuteCounter = new AtomicLong();
     private final AtomicLong fiveMinuteCounter = new AtomicLong();
     private final AtomicLong fifteenMinuteCounter = new AtomicLong();
@@ -50,20 +52,20 @@ public class MongoMetricCommandListener implements CommandListener {
         this.registerGauges();
     }
 
-    private Timer getOrCreateTimer(String commandName, String databaseName, String clusterId) {
-        String key = commandName + ":" + databaseName + ":" + clusterId;
+    private Timer getOrCreateTimer(String commandName, String collection, String clusterId) {
+        String key = commandName + ":" + collection + ":" + clusterId;
         return timerCache.computeIfAbsent(key, k -> Timer.builder("mongodb.command.timer")
                     .tag("commandName", commandName)
-                    .tag("databaseName", databaseName)
+                    .tag("collection", collection)
                     .tag("mongodb.cluster_id", clusterId)
                     .register(meterRegistry));
     }
 
-    private Counter getOrCreateErrorCounter(String commandName, String databaseName, String clusterId, Map<String, String> msg) {
-        String key = commandName + ":" + databaseName + ":" + clusterId + ":" + msg;
+    private Counter getOrCreateErrorCounter(String commandName, String collection, String clusterId, Map<String, String> msg) {
+        String key = commandName + ":" + collection + ":" + clusterId + ":" + msg;
         Counter.Builder tag = Counter.builder("mongodb.command.error.count")
             .tag("commandName", commandName)
-            .tag("databaseName", databaseName)
+            .tag("collection", collection)
             .tag("mongodb.cluster_id", clusterId);
         for (Map.Entry<String, String> entry : msg.entrySet()) {
             tag.tag("code", entry.getValue());
@@ -73,28 +75,30 @@ public class MongoMetricCommandListener implements CommandListener {
         return errorCounterCache.computeIfAbsent(key, k -> register);
     }
 
-    private Counter getOrCreateSlowQueryCounter(String commandName, String databaseName, String clusterId) {
-        String key = commandName + ":" + databaseName + ":" + clusterId;
+    private Counter getOrCreateSlowQueryCounter(String commandName, String collection, String clusterId) {
+        String key = commandName + ":" + collection + ":" + clusterId;
         return slowQueryCounterCache.computeIfAbsent(key, k -> Counter.builder("mongodb.command.slowQuery.count")
                     .tag("commandName", commandName)
-                    .tag("databaseName", databaseName)
+                    .tag("collection", collection)
                     .tag("mongodb.cluster_id", clusterId)
                     .register(meterRegistry));
     }
 
-    private Counter getOrCreateCommandFailedCounter(String commandName, String databaseName, String clusterId, String msg) {
-        String key = commandName + ":" + databaseName + ":" + clusterId + ":" + msg;
+    private Counter getOrCreateCommandFailedCounter(String commandName, String collection, String clusterId, String msg) {
+        String key = commandName + ":" + collection + ":" + clusterId + ":" + msg;
         return commandFailedCounterCache.computeIfAbsent(key, k -> Counter.builder("mongodb.command.failed.count")
                     .tag("commandName", commandName)
-                    .tag("databaseName", databaseName)
+                    .tag("collection", collection)
                     .tag("mongodb.cluster_id", clusterId)
                     .tag("msg", msg)
                     .register(meterRegistry));
     }
 
     @Override
-        public void commandStarted(CommandStartedEvent commandStartedEvent) {
+        public void commandStarted(CommandStartedEvent event) {
         // Implementation not required for this example
+        String collection = getCollectionName(event.getCommand(), event.getCommandName());
+        context.put(event.getRequestId(), collection);
     }
 
     @Override
@@ -115,8 +119,32 @@ public class MongoMetricCommandListener implements CommandListener {
 
         Map<String, String> msg = findMsg(success, writeErrors);
 
-        this.collectMetric(event.getCommandName(), event.getDatabaseName(), duration, success, event.getConnectionDescription(), msg);
+        String collection = Optional.ofNullable(context.get(event.getRequestId())).orElse("");
+
+        this.collectMetric(event.getCommandName(), collection, duration, success, event.getConnectionDescription(), msg);
     }
+
+    public static String getCollectionName(BsonDocument command, String commandName) {
+        if (COMMANDS_WITH_COLLECTION_NAME.contains(commandName)) {
+            String collectionName = getNonEmptyBsonString(command.get(commandName));
+            if (collectionName != null) {
+                return collectionName;
+            }
+        }
+        // Some other commands, like getMore, have a field like {"collection": collectionName}.
+        return getNonEmptyBsonString(command.get("collection"));
+    }
+
+    /**
+    * @return trimmed string from {@code bsonValue} or null if the trimmed string was empty or the
+    * value wasn't a string
+    */
+    protected static String getNonEmptyBsonString(BsonValue bsonValue) {
+        if (bsonValue == null || !bsonValue.isString()) return null;
+        String stringValue = bsonValue.asString().getValue().trim();
+        return stringValue.isEmpty() ? null : stringValue;
+    }
+
 
     private static Map<String, String> findMsg(boolean success, BsonValue writeErrors) {
         Map<String, String> msg = new HashMap<>();
@@ -138,10 +166,10 @@ public class MongoMetricCommandListener implements CommandListener {
         return msg;
     }
 
-    private void collectMetric(String commandName, String databaseName, long duration, boolean success,
+    private void collectMetric(String commandName, String collection, long duration, boolean success,
                                ConnectionDescription connectionDescription, Map<String, String> msg) {
         String clusterId = connectionDescription.getConnectionId().getServerId().getClusterId().getValue();
-        Timer commandSpecificTimer = this.getOrCreateTimer(commandName, databaseName, clusterId);
+        Timer commandSpecificTimer = this.getOrCreateTimer(commandName, collection, clusterId);
         commandSpecificTimer.record(duration, TimeUnit.MILLISECONDS);
 
         if (success) {
@@ -151,7 +179,7 @@ public class MongoMetricCommandListener implements CommandListener {
         }
 
         if (!msg.isEmpty()) {
-            Counter errorCounter = getOrCreateErrorCounter(commandName, databaseName, clusterId, msg);
+            Counter errorCounter = getOrCreateErrorCounter(commandName, collection, clusterId, msg);
             errorCounter.increment();
         }
 
@@ -159,12 +187,12 @@ public class MongoMetricCommandListener implements CommandListener {
         if (duration > SLOW_QUERY_TIME) {
             Timer slowQueryTimer = Timer.builder("mongodb.command.slowQuery.timer")
                         .tag("commandName", commandName)
-                        .tag("databaseName", databaseName)
+                        .tag("collection", collection)
                         .tag("mongodb.cluster_id", clusterId)
                         .register(meterRegistry);
             slowQueryTimer.record(duration, TimeUnit.MILLISECONDS);
 
-            Counter slowQueryCounter = getOrCreateSlowQueryCounter(commandName, databaseName, clusterId);
+            Counter slowQueryCounter = getOrCreateSlowQueryCounter(commandName, collection, clusterId);
             slowQueryCounter.increment();
         }
 
@@ -177,12 +205,13 @@ public class MongoMetricCommandListener implements CommandListener {
         log.info("mongo command failed, {}", commandFailedEvent.getThrowable().getMessage());
 
         String commandName = commandFailedEvent.getCommandName();
-        String databaseName = commandFailedEvent.getDatabaseName();
         ConnectionId connectionId = commandFailedEvent.getConnectionDescription().getConnectionId();
         String clusterId = connectionId.getServerId().getClusterId().getValue();
         String msg = commandFailedEvent.getThrowable().getMessage();
 
-        Counter commandFailedCounter = getOrCreateCommandFailedCounter(commandName, databaseName, clusterId, msg);
+        String collection = Optional.ofNullable(context.get(commandFailedEvent.getRequestId())).orElse("");
+
+        Counter commandFailedCounter = getOrCreateCommandFailedCounter(commandName, collection, clusterId, msg);
         commandFailedCounter.increment();
     }
 
