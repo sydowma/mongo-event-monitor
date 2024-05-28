@@ -1,6 +1,22 @@
 version: '3'
 
 services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "80:8080"
+      - "8081:8081"
+    environment:
+      - SPRING_PROFILES_ACTIVE=prod
+    volumes:
+      - ./target:/app/target
+      - ./logs:/app/logs
+      - ~/.m2:/root/.m2
+    command: [ "java", "-jar", "/app/app.jar" ]
+    networks:
+      - monitoring
   mongodb:
     image: mongo:7.0.9
     container_name: mongodb
@@ -14,6 +30,8 @@ services:
       - ./database/mongo-init.js:/docker-entrypoint-initdb.d/mongo-init.js:ro
     ports: 
       - '27017:27017'
+    networks:
+      - monitoring
   prometheus:
     image: prom/prometheus
     container_name: prometheus_demo
@@ -25,6 +43,8 @@ services:
     volumes:
       - ./prometheus:/etc/prometheus
       - prom_data:/prometheus
+    networks:
+      - monitoring
   grafana:
     image: grafana/grafana
     container_name: grafana_demo
@@ -36,5 +56,11 @@ services:
       - GF_SECURITY_ADMIN_PASSWORD=grafana
     volumes:
       - ./grafana:/etc/grafana/provisioning/datasources
+    networks:
+      - monitoring
 volumes:
   prom_data:
+
+networks:
+  monitoring:
+    external: true
