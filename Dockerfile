@@ -9,6 +9,8 @@ WORKDIR /app
 # Copy the pom.xml file
 COPY pom.xml .
 
+VOLUME /root/.m2
+
 # Download all required dependencies into one layer
 RUN mvn dependency:go-offline -B
 
