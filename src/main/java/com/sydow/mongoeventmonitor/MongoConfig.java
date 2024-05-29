@@ -26,7 +26,12 @@ public class MongoConfig {
     
     @Bean
     public MongoDatabase mongoDatabase() {
-        ConnectionString connectionString = new ConnectionString("mongodb://admin:adminpw@localhost:27017/");
+
+        String property = System.getenv("mongodb.uri");
+        if (property == null) {
+            property = "localhost:27017";
+        }
+        ConnectionString connectionString = new ConnectionString("mongodb://admin:adminpw@" + property);
         MongoClientSettings settings = MongoClientSettings.builder()
                 .addCommandListener(metricCommandListener())
                 .applyConnectionString(connectionString)
