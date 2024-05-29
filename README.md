@@ -17,10 +17,6 @@ Slow Query Detection: Identifies slow queries (default threshold: 1000ms) and re
 - MongoDB Java Driver 4.x
 - Micrometer 1.5 or higher
 
-Ability
 
 Contributing
 Contributions are welcome! Please submit a pull request or open an issue to discuss potential changes.
-
-License
-This project is licensed under the MIT License. See the LICENSE file for details.

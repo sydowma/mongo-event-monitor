@@ -1,27 +1,34 @@
-# Use an image that includes Maven and OpenJDK 17
-FROM maven:3.8-openjdk-17 as builder
+# Dockerfile
 
-# Set the working directory in the container
+# Use official maven image as the base image
+FROM maven:3.6.3-openjdk-11 as build
+
+# Set the working directory in the image
 WORKDIR /app
 
-# Copy only the POM file and source code (to cache dependencies)
-COPY pom.xml /app/
-COPY src /app/src
+# Copy the pom.xml file
+COPY pom.xml .
 
-# Build the application without running tests to speed up the build
-RUN mvn package -DskipTests
+# Download all required dependencies into one layer
+RUN mvn dependency:go-offline -B
 
-# Use a JDK 17 slim image for the final image to reduce size
-FROM openjdk:17-slim
+# Copy your other files
+COPY src ./src
 
-# Set the working directory for the runtime environment
+# Build the project
+RUN mvn clean package
+
+# Use openjdk image for running the app
+FROM openjdk:11-jre-slim
+
+# Set the working directory
 WORKDIR /app
 
-# Copy the built JAR file from the build stage
-COPY --from=builder /app/target/*.jar /app/app.jar
+# Copy the jar file from the build stage
+COPY --from=build /app/target/*.jar ./app.jar
 
-# Make port 8080 available to the world outside this container
-EXPOSE 8080
+# Expose the port
+EXPOSE 3000
 
-# Run the JAR file
-CMD ["java", "-jar", "/app/app.jar"]
+# Run the jar file 
+ENTRYPOINT ["java","-jar","/app/app.jar"]
