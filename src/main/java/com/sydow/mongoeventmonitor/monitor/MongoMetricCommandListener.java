@@ -13,6 +13,7 @@ import org.bson.BsonDocument;
 import org.bson.BsonValue;
 
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -31,12 +32,12 @@ public class MongoMetricCommandListener implements CommandListener {
 
     private final Counter commandSuccessCounter;
     private final Counter commandErrorCounter;
-    private final Map<String, Timer> timerCache = new HashMap<>();
-    private final Map<String, Counter> errorCounterCache = new HashMap<>();
-    private final Map<String, Counter> slowQueryCounterCache = new HashMap<>();
-    private final Map<String, Counter> commandFailedCounterCache = new HashMap<>();
+    private final Map<String, Timer> timerCache = new ConcurrentHashMap<>();
+    private final Map<String, Counter> errorCounterCache = new ConcurrentHashMap<>();
+    private final Map<String, Counter> slowQueryCounterCache = new ConcurrentHashMap<>();
+    private final Map<String, Counter> commandFailedCounterCache = new ConcurrentHashMap<>();
 
-    private final Map<Integer, String> context = new HashMap<>();
+    private final Map<Integer, String> context = new ConcurrentHashMap<>();
 
     private final AtomicLong oneMinuteCounter = new AtomicLong();
     private final AtomicLong fiveMinuteCounter = new AtomicLong();
@@ -119,7 +120,7 @@ public class MongoMetricCommandListener implements CommandListener {
 
         Map<String, String> msg = findMsg(success, writeErrors);
 
-        String collection = Optional.ofNullable(context.get(event.getRequestId())).orElse("");
+        String collection = Optional.ofNullable(context.remove(event.getRequestId())).orElse("");
 
         this.collectMetric(event.getCommandName(), collection, duration, success, event.getConnectionDescription(), msg);
     }
@@ -209,7 +210,7 @@ public class MongoMetricCommandListener implements CommandListener {
         String clusterId = connectionId.getServerId().getClusterId().getValue();
         String msg = commandFailedEvent.getThrowable().getMessage();
 
-        String collection = Optional.ofNullable(context.get(commandFailedEvent.getRequestId())).orElse("");
+        String collection = Optional.ofNullable(context.remove(commandFailedEvent.getRequestId())).orElse("");
 
         Counter commandFailedCounter = getOrCreateCommandFailedCounter(commandName, collection, clusterId, msg);
         commandFailedCounter.increment();
